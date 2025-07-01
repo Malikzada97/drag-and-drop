@@ -5,10 +5,10 @@ A modern, accessible, and responsive web application for uploading, previewing, 
 ## Features
 
 - **Drag & Drop Upload**: Effortlessly upload images by dragging them into the drop zone or by browsing files.
-- **Live Image Preview**: Instantly preview selected images before uploading.
+- **Live Image Preview**: Instantly preview selected images before uploading. Remove images before upload with a hover delete button.
 - **Progress Bar & Stats**: Simulated upload progress with speed and time estimates.
-- **Gallery Side Panel**: View, group, and manage all uploaded images in a persistent gallery.
-- **Delete & Undo**: Remove individual images, groups, or all uploads with confirmation dialogs.
+- **Gallery Side Panel**: View, group, and manage all uploaded images in a persistent gallery. Delete individual images (hover to reveal delete), delete entire batches (always visible button), or clear all with confirmation.
+- **Delete Confirmation Dialog**: Deleting all images prompts a modal dialog that remains visible until you confirm or cancel.
 - **Accessibility**: Keyboard navigation, ARIA roles, focus management, and screen reader support.
 - **Dark Mode**: Toggle between light and dark themes, with system preference detection.
 - **Persistent Storage**: Uploaded images and groups are saved in localStorage for session persistence.
@@ -59,20 +59,25 @@ drag-and-drop/
 1. **Upload Images**
    - Drag images (JPG, PNG, GIF, max 5MB each) into the drop zone or click to select.
    - Preview images, see file count and total size.
+   - Remove images before upload by hovering and clicking the delete icon.
    - Click "Upload Images" to simulate upload (no server required).
 
 2. **Manage Gallery**
    - Uploaded images appear in the side panel, grouped by upload session.
-   - Delete individual images, entire groups, or all uploads (with confirmation).
+   - Delete individual images (hover to reveal delete), delete entire groups (always visible button), or all uploads (with confirmation dialog).
    - Gallery persists across page reloads (localStorage).
 
-3. **Accessibility & Keyboard Shortcuts**
+3. **Delete Confirmation Dialog**
+   - When deleting all images, a modal dialog appears and remains visible until you confirm or cancel.
+   - The background is blurred and buttons are always accessible.
+
+4. **Accessibility & Keyboard Shortcuts**
    - Tab/Shift+Tab to navigate.
    - Enter/Space to activate buttons.
    - `Ctrl+U` or `Cmd+U` to focus the upload area.
    - `Escape` to close dialogs.
 
-4. **Theme**
+5. **Theme**
    - Toggle dark/light mode using the sun/moon button in the header.
    - Respects system theme preference.
 
@@ -87,6 +92,7 @@ drag-and-drop/
 - Uses ARIA roles, labels, and live regions.
 - Focus indicators and skip links for keyboard users.
 - High contrast and reduced motion support.
+- Dialogs trap focus and are accessible until dismissed.
 
 ## Technical Details
 
@@ -100,6 +106,20 @@ drag-and-drop/
 - **No real file upload**: This is a front-end demo; files are not sent to a server.
 - **Browser storage limits**: Large or many images may exceed localStorage capacity.
 - **Security**: Only image files are accepted; validation is enforced client-side.
+
+## Deployment
+
+- The project is ready for deployment as a static site.
+- All assets are local; no build step is required.
+- For best results, serve over HTTPS and set proper cache headers.
+- Optionally, use a static host (Netlify, Vercel, GitHub Pages, etc.).
+
+## Troubleshooting
+
+- **Dialog not visible or interactive**: Ensure you are using a modern browser and have not disabled JavaScript or CSS.
+- **Images not persisting**: Check browser localStorage settings and quota.
+- **Performance issues**: Avoid uploading very large or many images at once; browser storage is limited.
+- **Accessibility**: Use keyboard navigation and screen reader tools to verify accessibility features.
 
 ## Credits
 

@@ -1,4 +1,7 @@
 class SidePanel {
+    /**
+     * Initialize the side panel, set up DOM references, and event listeners.
+     */
     constructor() {
         this.uploadedImagesList = document.getElementById('uploadedImagesList');
         this.deleteAllButton = document.getElementById('deleteAllButton');
@@ -10,6 +13,7 @@ class SidePanel {
         this.isMobile = window.innerWidth < 640;
         this.storageKey = 'uploadedImagesData';
         this.isInitialized = false;
+        this.imageCache = new Map(); // For managing object URLs
         
         // Debug logging for element initialization
         console.log('SidePanel constructor - Elements found:');
@@ -21,9 +25,17 @@ class SidePanel {
         console.log('- emptyState:', !!this.emptyState);
         
         // Check if all required elements exist
-        if (!this.uploadedImagesList || !this.deleteAllButton || !this.deleteConfirmationDialog || 
-            !this.cancelDeleteButton || !this.confirmDeleteButton || !this.emptyState) {
-            throw new Error('Required DOM elements not found for SidePanel');
+        const missing = [];
+        if (!this.uploadedImagesList) missing.push('uploadedImagesList');
+        if (!this.deleteAllButton) missing.push('deleteAllButton');
+        if (!this.deleteConfirmationDialog) missing.push('deleteConfirmationDialog');
+        if (!this.cancelDeleteButton) missing.push('cancelDeleteButton');
+        if (!this.confirmDeleteButton) missing.push('confirmDeleteButton');
+        if (!this.emptyState) missing.push('emptyState');
+        if (missing.length > 0) {
+            const msg = `Initialization failed: Missing required element(s): ${missing.join(', ')}. Please check your HTML.`;
+            this.showUserError(msg);
+            throw new Error(msg);
         }
         
         this.initializeEventListeners();
@@ -31,7 +43,9 @@ class SidePanel {
         this.updateEmptyState();
     }
 
-    // Test localStorage functionality
+    /**
+     * Test if localStorage is available and working.
+     */
     testLocalStorage() {
         console.log('Testing localStorage functionality...');
         
@@ -76,29 +90,40 @@ class SidePanel {
         }
     }
 
-    // Initialize the side panel and load saved data
+    /**
+     * Initialize the side panel and load saved data from localStorage.
+     */
     async initialize() {
         try {
             console.log('SidePanel: Starting initialization...');
             
             // Test localStorage first
             if (!this.testLocalStorage()) {
-                throw new Error('localStorage test failed');
+                const msg = 'Initialization failed: localStorage is not available or not working. Please check your browser settings.';
+                this.showUserError(msg);
+                throw new Error(msg);
             }
             
             await this.loadFromLocalStorage();
             this.isInitialized = true;
             console.log('SidePanel: Initialization complete');
         } catch (error) {
-            console.error('SidePanel: Initialization failed:', error);
+            const msg = 'SidePanel: Initialization failed. ' + (error && error.message ? error.message : error);
+            this.showUserError(msg);
+            console.error(msg);
             this.isInitialized = true; // Mark as initialized even if loading fails
         }
     }
 
+    /**
+     * Set up all event listeners for delete buttons, dialogs, and resize.
+     */
     initializeEventListeners() {
         this.deleteAllButton.addEventListener('click', () => this.showDeleteConfirmation());
         this.cancelDeleteButton.addEventListener('click', () => this.hideDeleteConfirmation());
-        this.confirmDeleteButton.addEventListener('click', () => this.deleteAllImages());
+        this.confirmDeleteButton.addEventListener('click', () => {
+            this.deleteAllImages(true); // pass true to indicate user confirmed
+        });
         
         // Enhanced dialog interactions
         this.deleteConfirmationDialog.addEventListener('click', (e) => {
@@ -124,10 +149,13 @@ class SidePanel {
         });
     }
 
+    /**
+     * Set up mobile view and touch interactions for the side panel.
+     */
     setupMobileView() {
         if (this.isMobile) {
             const handle = document.createElement('div');
-            handle.className = 'w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-4 cursor-grab active:cursor-grabbing';
+            handle.className = 'handle w-12 h-1 bg-gray-300 dark:bg-gray-600 rounded-full mx-auto mb-4 cursor-grab active:cursor-grabbing';
             handle.setAttribute('role', 'presentation');
             handle.setAttribute('aria-label', 'Drag to resize panel');
             
@@ -144,6 +172,9 @@ class SidePanel {
         }
     }
 
+    /**
+     * Set up touch drag-to-close interactions for mobile side panel.
+     */
     setupTouchInteractions() {
         let startY = 0;
         let currentY = 0;
@@ -171,8 +202,14 @@ class SidePanel {
             if (deltaY > 100) { // If dragged down more than 100px, close the panel
                 panel.style.transform = 'translateY(100%)';
                 panel.classList.remove('active');
+                // Accessibility: hide from screen readers and tab order
+                panel.setAttribute('aria-hidden', 'true');
+                panel.setAttribute('tabindex', '-1');
             } else {
                 panel.style.transform = '';
+                // Accessibility: restore for screen readers and tab order
+                panel.removeAttribute('aria-hidden');
+                panel.removeAttribute('tabindex');
             }
         };
 
@@ -181,6 +218,9 @@ class SidePanel {
         panel.addEventListener('touchend', handleTouchEnd);
     }
 
+    /**
+     * Show the delete confirmation dialog and focus the cancel button.
+     */
     showDeleteConfirmation() {
         this.deleteConfirmationDialog.classList.remove('hidden');
         this.deleteConfirmationDialog.classList.add('flex', 'animate-fade-in');
@@ -189,16 +229,25 @@ class SidePanel {
         const dialogContent = this.deleteConfirmationDialog.querySelector('.bg-white');
         if (dialogContent) {
             dialogContent.classList.add('animate-bounce-in');
+            dialogContent.classList.remove('scale-95', 'opacity-0');
+            dialogContent.classList.add('scale-100', 'opacity-100');
+            dialogContent.addEventListener('click', (e) => e.stopPropagation());
         }
         
+        // Focus the first actionable button for accessibility
         this.cancelDeleteButton.focus();
     }
 
+    /**
+     * Hide the delete confirmation dialog and return focus to deleteAllButton.
+     */
     hideDeleteConfirmation() {
         const dialog = this.deleteConfirmationDialog;
         const dialogContent = dialog.querySelector('.bg-white');
         
         if (dialogContent) {
+            dialogContent.classList.remove('scale-100', 'opacity-100');
+            dialogContent.classList.add('scale-95', 'opacity-0');
             dialogContent.style.transform = 'scale(0.95)';
             dialogContent.style.opacity = '0';
         }
@@ -211,137 +260,109 @@ class SidePanel {
                 dialogContent.style.opacity = '';
                 dialogContent.classList.remove('animate-bounce-in');
             }
+            // Return focus to deleteAllButton for accessibility
+            this.deleteAllButton.focus();
         }, 300);
     }
 
-    addImageGroup(images, timestamp) {
-        console.log(`addImageGroup called with ${images.length} images`);
-        
-        if (!images || images.length === 0) {
-            console.warn('addImageGroup: No images provided');
-            return;
-        }
-        
-        const groupId = `group-${Date.now()}`;
-        const groupElement = this.createGroupElement(groupId, images, timestamp);
-        
-        // Add with animation
+    /**
+     * Add a new image group to the gallery and save to localStorage.
+     */
+    addImageGroup(previews, timestamp) {
+        if (!previews?.length) return;
+
+        const groupId = `group-${timestamp}`;
+        const groupElement = this.createGroupElement(groupId, previews, timestamp);
+        groupElement.id = groupId;
         groupElement.style.opacity = '0';
-        groupElement.style.transform = 'translateY(20px) scale(0.95)';
+        groupElement.style.transform = 'translateY(20px)';
         this.uploadedImagesList.prepend(groupElement);
-        
-        // Trigger animation
         requestAnimationFrame(() => {
-            groupElement.style.transition = 'opacity 0.4s ease, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+            groupElement.style.transition = 'all 0.3s ease-out';
             groupElement.style.opacity = '1';
-            groupElement.style.transform = 'translateY(0) scale(1)';
+            groupElement.style.transform = 'translateY(0)';
         });
-
-        this.uploadedGroups.set(groupId, { images, timestamp });
-        console.log(`Group added. Total groups: ${this.uploadedGroups.size}`);
-        
-        // Save to localStorage immediately
-        this.saveToLocalStorage().then(() => {
-            console.log('Successfully saved after adding image group');
-        }).catch(error => {
-            console.error('Failed to save after adding image group:', error);
-        });
-        
+        // Store preview data as images
+        this.uploadedGroups.set(groupId, { images: previews, timestamp });
+        this.saveToLocalStorage();
         this.updateEmptyState();
-
-        // Show panel on mobile
-        if (this.isMobile) {
-            const panel = document.getElementById('uploadedImagesPanel');
-            panel.classList.add('active');
-        }
     }
 
-    createGroupElement(groupId, images, timestamp) {
+    /**
+     * Create a DOM element for an image group, with ARIA and remove buttons.
+     * Adds per-image and per-batch delete buttons, and margin between batches.
+     */
+    createGroupElement(groupId, previews, timestamp) {
         const groupDiv = document.createElement('div');
-        groupDiv.className = 'card-modern bg-gray-50 dark:bg-gray-700 rounded-xl p-4 mb-4 transform transition-all duration-300 hover:shadow-card-hover hover:-translate-y-1';
+        groupDiv.className = 'image-group mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-card';
         groupDiv.id = groupId;
+        groupDiv.setAttribute('role', 'region');
+        groupDiv.setAttribute('aria-label', `Uploaded image group from ${this.formatTimestamp(timestamp)}`);
 
+        // Batch header with always-visible delete button
         const header = document.createElement('div');
-        header.className = 'flex justify-between items-center mb-3';
-        
-        const timeElement = document.createElement('span');
-        timeElement.className = 'text-sm text-gray-600 dark:text-gray-300 font-medium';
-        timeElement.textContent = this.formatTimestamp(timestamp);
-        
-        const deleteGroupButton = document.createElement('button');
-        deleteGroupButton.className = 'p-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-all duration-200 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 touch-target';
-        deleteGroupButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>';
-        deleteGroupButton.setAttribute('aria-label', 'Delete image group');
-        
-        deleteGroupButton.addEventListener('click', () => {
-            groupDiv.style.opacity = '0';
-            groupDiv.style.transform = 'scale(0.95) translateY(-10px)';
-            setTimeout(() => this.deleteGroup(groupId), 300);
-        });
-
-        header.appendChild(timeElement);
-        header.appendChild(deleteGroupButton);
-
-        const imagesGrid = document.createElement('div');
-        imagesGrid.className = 'grid grid-cols-2 gap-3';
-
-        images.forEach((image, index) => {
-            const imageContainer = document.createElement('div');
-            imageContainer.className = 'relative group aspect-square rounded-lg overflow-hidden';
-
-            const img = document.createElement('img');
-            img.src = URL.createObjectURL(image);
-            img.className = 'w-full h-full object-cover transition-all duration-300 group-hover:scale-110';
-            img.alt = `Uploaded image ${index + 1}`;
-            img.loading = 'lazy';
-
-            const deleteButton = document.createElement('button');
-            deleteButton.className = 'absolute top-2 right-2 bg-red-600 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200 transform scale-90 group-hover:scale-100 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 shadow-lg touch-target';
-            deleteButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>';
-            deleteButton.setAttribute('aria-label', 'Delete image');
-            
-            deleteButton.addEventListener('click', () => {
-                imageContainer.style.opacity = '0';
-                imageContainer.style.transform = 'scale(0.9) rotate(5deg)';
-                setTimeout(() => this.deleteImage(groupId, index), 300);
-            });
-
-            imageContainer.appendChild(img);
-            imageContainer.appendChild(deleteButton);
-            imagesGrid.appendChild(imageContainer);
-        });
-
+        header.className = 'flex justify-between items-center mb-2';
+        const batchLabel = document.createElement('span');
+        batchLabel.className = 'text-sm text-gray-500 dark:text-gray-400';
+        batchLabel.textContent = this.formatTimestamp(timestamp);
+        const batchDeleteBtn = document.createElement('button');
+        batchDeleteBtn.className = 'remove-button !static !opacity-100 !transform-none ml-2';
+        batchDeleteBtn.setAttribute('aria-label', 'Delete this batch');
+        batchDeleteBtn.innerHTML = '🗑️';
+        batchDeleteBtn.addEventListener('click', () => this.deleteGroup(groupId));
+        header.appendChild(batchLabel);
+        header.appendChild(batchDeleteBtn);
         groupDiv.appendChild(header);
-        groupDiv.appendChild(imagesGrid);
 
+        // Images grid
+        const imagesGrid = document.createElement('div');
+        imagesGrid.className = 'grid grid-cols-2 gap-2';
+        previews.forEach((preview) => {
+            const imgContainer = document.createElement('div');
+            imgContainer.className = 'preview-container aspect-square';
+            const img = document.createElement('img');
+            img.src = preview.url;
+            img.alt = `Uploaded ${preview.name}`;
+            img.className = 'w-full h-full object-cover rounded';
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-button';
+            removeBtn.setAttribute('aria-label', `Remove image ${preview.name}`);
+            removeBtn.innerHTML = `🗑️`;
+            removeBtn.addEventListener('click', () => this.deleteImageById(groupId, preview.id));
+            imgContainer.appendChild(img);
+            imgContainer.appendChild(removeBtn);
+            imagesGrid.appendChild(imgContainer);
+        });
+        groupDiv.appendChild(imagesGrid);
         return groupDiv;
     }
 
-    deleteImage(groupId, imageIndex) {
+    /**
+     * Delete a single image from a group by its unique ID and update storage/UI.
+     */
+    deleteImageById(groupId, imageId) {
         const group = this.uploadedGroups.get(groupId);
         if (group) {
-            group.images.splice(imageIndex, 1);
+            group.images = group.images.filter(img => img.id !== imageId);
             if (group.images.length === 0) {
                 this.deleteGroup(groupId);
             } else {
                 const groupElement = document.getElementById(groupId);
                 if (groupElement) {
                     const newGroupElement = this.createGroupElement(groupId, group.images, group.timestamp);
+                    newGroupElement.id = groupId;
                     groupElement.replaceWith(newGroupElement);
                 }
+                this.uploadedGroups.set(groupId, group);
             }
-            
-            // Save to localStorage immediately
-            this.saveToLocalStorage().then(() => {
-                console.log('Successfully saved after deleting image');
-            }).catch(error => {
-                console.error('Failed to save after deleting image:', error);
-            });
-            
+            this.saveToLocalStorage();
             this.updateEmptyState();
         }
     }
 
+    /**
+     * Delete an entire group from the gallery and update storage/UI.
+     */
     deleteGroup(groupId) {
         const groupElement = document.getElementById(groupId);
         if (groupElement) {
@@ -350,23 +371,19 @@ class SidePanel {
             setTimeout(() => {
                 groupElement.remove();
                 this.uploadedGroups.delete(groupId);
-                
-                // Save to localStorage immediately
-                this.saveToLocalStorage().then(() => {
-                    console.log('Successfully saved after deleting group');
-                }).catch(error => {
-                    console.error('Failed to save after deleting group:', error);
-                });
-                
+                this.saveToLocalStorage();
                 this.updateEmptyState();
             }, 300);
         }
     }
 
-    deleteAllImages() {
+    /**
+     * Delete all images/groups from the gallery and update storage/UI.
+     * @param {boolean} confirmed - If true, hide the dialog after delete
+     */
+    deleteAllImages(confirmed = false) {
         const elements = Array.from(this.uploadedImagesList.children);
         let delay = 0;
-        
         elements.forEach((element) => {
             setTimeout(() => {
                 element.style.opacity = '0';
@@ -374,28 +391,21 @@ class SidePanel {
             }, delay);
             delay += 100;
         });
-
         setTimeout(() => {
             this.uploadedImagesList.innerHTML = '';
             this.uploadedGroups.clear();
-            
-            // Save to localStorage immediately
-            this.saveToLocalStorage().then(() => {
-                console.log('Successfully saved after deleting all images');
-            }).catch(error => {
-                console.error('Failed to save after deleting all images:', error);
-            });
-            
+            this.saveToLocalStorage();
             this.updateEmptyState();
-            this.hideDeleteConfirmation();
-            
-            // Show success message
+            if (confirmed) this.hideDeleteConfirmation();
             if (window.toastManager) {
                 window.toastManager.show('All images deleted successfully', 'success');
             }
         }, delay + 300);
     }
 
+    /**
+     * Format a timestamp for display in ARIA labels and UI.
+     */
     formatTimestamp(timestamp) {
         const date = new Date(timestamp);
         const now = new Date();
@@ -427,6 +437,9 @@ class SidePanel {
         return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     }
 
+    /**
+     * Show or hide the empty state message based on gallery contents.
+     */
     updateEmptyState() {
         console.log(`updateEmptyState called. Groups count: ${this.uploadedGroups.size}`); // Debug log
         
@@ -451,99 +464,34 @@ class SidePanel {
         }
     }
 
-    // Convert File object to base64 string for storage
-    fileToBase64(file) {
-        return new Promise((resolve, reject) => {
-            if (!file || !(file instanceof File)) {
-                reject(new Error('Invalid file object'));
-                return;
-            }
-            
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = error => reject(error);
-        });
-    }
-
-    // Convert base64 string back to File object
-    base64ToFile(base64String, fileName, mimeType) {
-        try {
-            if (!base64String || typeof base64String !== 'string') {
-                throw new Error('Invalid base64 string');
-            }
-            
-            const parts = base64String.split(',');
-            if (parts.length !== 2) {
-                throw new Error('Invalid base64 format');
-            }
-            
-            const byteCharacters = atob(parts[1]);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            return new File([byteArray], fileName, { type: mimeType });
-        } catch (error) {
-            console.error('Error converting base64 to file:', error);
-            throw error;
-        }
-    }
-
-    // Save uploaded images to localStorage
+    /**
+     * Save all image groups to localStorage, with quota error handling.
+     * Store as an array of groups: [{timestamp, images: [{id, name, type, data}]}]
+     */
     async saveToLocalStorage() {
         try {
-            console.log('Saving to localStorage...');
-            console.log('Current uploadedGroups size:', this.uploadedGroups.size);
-            
             if (this.uploadedGroups.size === 0) {
-                console.log('No groups to save, clearing localStorage');
                 localStorage.removeItem(this.storageKey);
                 return;
             }
-            
-            const storageData = {};
-            
-            for (const [groupId, groupData] of this.uploadedGroups) {
-                console.log(`Processing group ${groupId} for storage with ${groupData.images.length} images`);
-                const imageData = [];
-                
-                for (const file of groupData.images) {
-                    try {
-                        console.log(`Converting file ${file.name} to base64...`);
-                        const base64 = await this.fileToBase64(file);
-                        imageData.push({
-                            name: file.name,
-                            type: file.type,
-                            size: file.size,
-                            data: base64
-                        });
-                        console.log(`Converted ${file.name} successfully`);
-                    } catch (error) {
-                        console.error(`Failed to convert ${file.name}:`, error);
-                        // Continue with other files
-                    }
+            // Store as array of groups
+            const groupsArray = Array.from(this.uploadedGroups.values()).map(group => ({
+                timestamp: group.timestamp,
+                images: group.images.map(img => ({
+                    id: img.id,
+                    name: img.name,
+                    type: img.type,
+                    data: img.url || img.data // always store base64
+                }))
+            }));
+            try {
+                localStorage.setItem(this.storageKey, JSON.stringify(groupsArray));
+            } catch (e) {
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                    if (window.toastManager) window.toastManager.show('Storage limit reached! Please delete some images.', 'error');
+                    return;
                 }
-                
-                if (imageData.length > 0) {
-                    storageData[groupId] = {
-                        images: imageData,
-                        timestamp: groupData.timestamp
-                    };
-                }
-            }
-            
-            const jsonData = JSON.stringify(storageData);
-            console.log('Saving data to localStorage, size:', jsonData.length);
-            localStorage.setItem(this.storageKey, jsonData);
-            
-            // Verify the data was saved
-            const savedData = localStorage.getItem(this.storageKey);
-            if (savedData) {
-                console.log('Successfully saved to localStorage, verification passed');
-            } else {
-                throw new Error('Data not found in localStorage after save');
+                throw e;
             }
         } catch (error) {
             console.error('Error saving to localStorage:', error);
@@ -551,74 +499,74 @@ class SidePanel {
         }
     }
 
-    // Load uploaded images from localStorage
+    /**
+     * Load all image groups from localStorage and render them in the gallery.
+     *
+     * Note: For very large galleries, consider lazy loading images for performance.
+     */
     async loadFromLocalStorage() {
         try {
-            console.log('Loading from localStorage...');
             const savedData = localStorage.getItem(this.storageKey);
-            if (!savedData) {
-                console.log('No saved data found in localStorage');
-                return;
+            if (!savedData) return;
+            const groupsArray = JSON.parse(savedData);
+            if (!Array.isArray(groupsArray)) return;
+            this.uploadedGroups.clear();
+            this.uploadedImagesList.innerHTML = '';
+            for (const group of groupsArray) {
+                if (!group.images || !Array.isArray(group.images)) continue;
+                const groupId = `group-${group.timestamp}`;
+                // Convert images to preview objects
+                const previews = group.images.map(img => ({
+                    id: img.id,
+                    url: img.data,
+                    name: img.name,
+                    type: img.type
+                }));
+                const groupElement = this.createGroupElement(groupId, previews, group.timestamp);
+                groupElement.id = groupId;
+                this.uploadedImagesList.appendChild(groupElement);
+                this.uploadedGroups.set(groupId, { images: previews, timestamp: group.timestamp });
             }
-
-            console.log('Found saved data, parsing...');
-            const storageData = JSON.parse(savedData);
-            console.log('Storage data keys:', Object.keys(storageData));
-            
-            let loadedCount = 0;
-            for (const [groupId, groupData] of Object.entries(storageData)) {
-                try {
-                    console.log(`Processing group ${groupId}:`, groupData);
-                    
-                    if (!groupData.images || !Array.isArray(groupData.images)) {
-                        console.warn(`Invalid group data for ${groupId}, skipping`);
-                        continue;
-                    }
-                    
-                    const images = [];
-                    
-                    for (const imageInfo of groupData.images) {
-                        try {
-                            if (!imageInfo.data || !imageInfo.name || !imageInfo.type) {
-                                console.warn(`Invalid image info in group ${groupId}, skipping`);
-                                continue;
-                            }
-                            
-                            const file = this.base64ToFile(imageInfo.data, imageInfo.name, imageInfo.type);
-                            images.push(file);
-                            console.log(`Converted image: ${imageInfo.name}`);
-                        } catch (error) {
-                            console.error(`Failed to convert image ${imageInfo.name}:`, error);
-                        }
-                    }
-                    
-                    if (images.length > 0) {
-                        // Create the group element and add to UI
-                        const groupElement = this.createGroupElement(groupId, images, groupData.timestamp);
-                        this.uploadedImagesList.appendChild(groupElement);
-                        
-                        // Add to the Map
-                        this.uploadedGroups.set(groupId, {
-                            images: images,
-                            timestamp: groupData.timestamp
-                        });
-                        
-                        loadedCount++;
-                        console.log(`Successfully loaded group ${groupId} with ${images.length} images`);
-                    }
-                } catch (error) {
-                    console.error(`Error processing group ${groupId}:`, error);
-                }
-            }
-            
-            console.log(`Loaded ${loadedCount} image groups from localStorage`);
             this.updateEmptyState();
         } catch (error) {
             console.error('Error loading from localStorage:', error);
-            // Clear corrupted data
             localStorage.removeItem(this.storageKey);
             throw error;
         }
+    }
+
+    /**
+     * Show a user-friendly error message, using toast for non-critical errors.
+     */
+    showUserError(message, critical = false) {
+        if (!critical && window.toastManager) {
+            window.toastManager.show(message, 'error');
+            return;
+        }
+        let errorMessage = document.getElementById('errorMessage');
+        if (!errorMessage) {
+            // If not present, create it at the top of the body
+            errorMessage = document.createElement('div');
+            errorMessage.id = 'errorMessage';
+            errorMessage.className = 'bg-red-100 border-l-4 border-red-500 text-red-700 dark:bg-red-900 dark:border-red-700 dark:text-red-100 p-4 mb-6 rounded';
+            errorMessage.setAttribute('role', 'alert');
+            errorMessage.setAttribute('aria-live', 'polite');
+            document.body.prepend(errorMessage);
+        }
+        errorMessage.textContent = message;
+        errorMessage.classList.remove('hidden');
+    }
+
+    /**
+     * Utility: Revoke object URLs if used for previews (future-proofing).
+     */
+    revokeObjectURLs() {
+        // If you ever use URL.createObjectURL for image previews, store the URLs and call URL.revokeObjectURL(url) here
+        // Currently, previews use base64, so this is not needed, but this is best practice for future-proofing.
+        for (const url of this.imageCache.values()) {
+            try { URL.revokeObjectURL(url); } catch (e) {}
+        }
+        this.imageCache.clear();
     }
 }
 
@@ -630,4 +578,7 @@ class SidePanel {
 function handleStorageError(error) {
     // Optionally show a toast or alert
     console.error('Storage error:', error);
-} 
+}
+
+window.SidePanel = SidePanel;
+console.log('window.SidePanel set:', window.SidePanel); 

@@ -27,21 +27,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             totalSize: document.getElementById('totalSize'),
             uploadButton: document.getElementById('uploadButton'),
             cancelButton: document.getElementById('cancelButton'),
-            clearButton: document.getElementById('clearButton'),
             uploadSpeed: document.getElementById('uploadSpeed'),
             timeRemaining: document.getElementById('timeRemaining'),
             errorMessage: document.getElementById('errorMessage'),
             maxFileSizeDisplay: document.getElementById('maxFileSizeDisplay'),
             maxFileSize: 5 * 1024 * 1024, // 5MB
-            allowedTypes: ['image/jpeg', 'image/png', 'image/gif']
+            allowedTypes: ['image/jpeg', 'image/png', 'image/gif'],
+            storageKey: 'uploadedImagesData'
         });
 
         // Make toast manager globally available
         window.toastManager = uploader.toastManager;
 
         // Initialize the side panel
-        console.log('Initializing side panel...');
-        const sidePanel = new SidePanel();
+        console.log('window.SidePanel before instantiation:', window.SidePanel);
+        const sidePanel = new window.SidePanel();
         window.sidePanel = sidePanel;
         
         // Initialize and load saved data
@@ -125,11 +125,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
 
-        // After successful upload, add images to side panel
-        document.getElementById('dropZone').addEventListener('uploadSuccess', (event) => {
-            const uploadedFiles = event.detail.files;
-            if (uploadedFiles && uploadedFiles.length > 0) {
-                sidePanel.addImageGroup(uploadedFiles, Date.now());
+        // Event listener for successful uploads
+        document.getElementById('dropZone').addEventListener('uploadSuccess', (e) => {
+            if (e.detail.previews?.length) {
+                // Use the same timestamp as in uploader's group
+                const now = Date.now();
+                sidePanel.addImageGroup(e.detail.previews, now);
             }
         });
 

@@ -7,20 +7,18 @@ class ToastManager {
         const toast = document.createElement('div');
         toast.className = `toast-modern animate-slide-in-right`;
         toast.setAttribute('role', 'alert');
-        
-        const icon = type === 'success' 
+
+        const icon = type === 'success'
             ? '<svg class="w-5 h-5 text-success-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>'
             : '<svg class="w-5 h-5 text-error-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>';
-        
+
         const bgColor = type === 'success' ? 'bg-success-50 border-success-200' : 'bg-error-50 border-error-200';
         const textColor = type === 'success' ? 'text-success-800' : 'text-error-800';
-        
+
         toast.innerHTML = `
             <div class="p-4 ${bgColor} border rounded-xl shadow-card">
                 <div class="flex items-center gap-3">
-                    <span class="flex-shrink-0">
-                        ${icon}
-                    </span>
+                    <span class="flex-shrink-0">${icon}</span>
                     <span class="text-sm font-medium ${textColor}">${message}</span>
                 </div>
             </div>
@@ -28,252 +26,239 @@ class ToastManager {
 
         document.body.appendChild(toast);
         this.toasts.add(toast);
-
-        // Trigger reflow to ensure animation plays
         toast.offsetHeight;
-
-        setTimeout(() => {
-            toast.classList.add('show');
-        }, 10);
-
+        setTimeout(() => toast.classList.add('show'), 10);
         setTimeout(() => {
             toast.classList.remove('show');
-            
             setTimeout(() => {
-                if (document.body.contains(toast)) {
-                    document.body.removeChild(toast);
-                }
+                if (document.body.contains(toast)) document.body.removeChild(toast);
                 this.toasts.delete(toast);
             }, 300);
         }, duration);
     }
 }
 
+// App-wide configuration
+const UPLOADER_CONFIG = {
+    MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
+    ALLOWED_TYPES: ['image/jpeg', 'image/png', 'image/gif'],
+    STORAGE_KEY: 'uploadedImagesData'
+};
+
+// Utility: Validate a file for type and size
+function isValidImageFile(file, config = UPLOADER_CONFIG) {
+    if (!config.ALLOWED_TYPES.includes(file.type)) {
+        return { valid: false, error: `Invalid file type: ${file.name}` };
+    }
+    if (file.size > config.MAX_FILE_SIZE) {
+        return { valid: false, error: `File too large: ${file.name}` };
+    }
+    if (file.size === 0) {
+        return { valid: false, error: `File is empty: ${file.name}` };
+    }
+    return { valid: true };
+}
+
 class DragDropUploader {
+    /**
+     * Initialize the uploader with DOM elements and config.
+     */
     constructor(options) {
-        this.dropZone = options.dropZone;
-        this.fileInput = options.fileInput;
-        this.previewSection = options.previewSection;
-        this.imagePreview = options.imagePreview;
-        this.progressBar = options.progressBar;
-        this.fileCount = options.fileCount;
-        this.totalSize = options.totalSize;
-        this.uploadButton = options.uploadButton;
-        this.cancelButton = options.cancelButton;
-        this.clearButton = options.clearButton;
-        this.uploadSpeed = options.uploadSpeed;
-        this.timeRemaining = options.timeRemaining;
-        this.errorMessage = options.errorMessage;
-        this.maxFileSizeDisplay = options.maxFileSizeDisplay;
-        this.maxFileSize = options.maxFileSize || 5 * 1024 * 1024; // 5MB default
-        this.allowedTypes = options.allowedTypes || ['image/jpeg', 'image/png', 'image/gif'];
-        this.storageKey = options.storageKey || 'lastUploadedImages';
-        this.boundEventHandlers = new Map();
-        this.uploadInterval = null;
+        Object.assign(this, options);
+        this.maxFileSize = UPLOADER_CONFIG.MAX_FILE_SIZE;
+        this.allowedTypes = UPLOADER_CONFIG.ALLOWED_TYPES;
+        this.storageKey = UPLOADER_CONFIG.STORAGE_KEY;
+        this.toastManager = new ToastManager();
+        this.selectedFiles = [];
         this.isUploading = false;
+        this.uploadInterval = null;
         this.startTime = null;
         this.lastLoaded = 0;
-        this.files = [];
-        this.toastManager = new ToastManager();
-        
-        // Add drag feedback
         this.dragCounter = 0;
         this.init();
     }
 
+    // Initialize event listeners and UI
     init() {
         this.setupEventListeners();
-        this.loadFromLocalStorage();
+        // No longer loads previous uploads here
         this.updateMaxFileSizeDisplay();
     }
 
+    // Update the max file size display in the UI
     updateMaxFileSizeDisplay() {
         this.maxFileSizeDisplay.textContent = this.formatFileSize(this.maxFileSize);
     }
 
+    // Format file size for display
     formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
     }
 
+    /**
+     * Set up all event listeners for drag/drop, file input, and buttons.
+     */
     setupEventListeners() {
-        const handlers = {
-            dragover: (e) => this.handleDragOver(e),
-            dragleave: () => this.handleDragLeave(),
-            drop: (e) => this.handleDrop(e),
-            click: () => this.fileInput.click(),
-            change: (e) => this.handleFileSelect(e),
-            upload: () => this.simulateUpload(),
-            keydown: (e) => this.handleKeyDown(e),
-            cancel: () => this.cancelUpload()
-        };
-
-        this.dropZone.addEventListener('dragover', handlers.dragover);
-        this.dropZone.addEventListener('dragleave', handlers.dragleave);
-        this.dropZone.addEventListener('drop', handlers.drop);
-        this.dropZone.addEventListener('click', handlers.click);
-        this.fileInput.addEventListener('change', handlers.change);
-        this.uploadButton.addEventListener('click', handlers.upload);
-        this.dropZone.addEventListener('keydown', handlers.keydown);
-        this.cancelButton.addEventListener('click', handlers.cancel);
-
-        // Add keyboard event listeners for buttons
-        this.uploadButton.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                this.simulateUpload();
-            }
-        });
-
-        this.cancelButton.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                this.cancelUpload();
-            }
-        });
-
-        this.boundEventHandlers.set(this.dropZone, handlers);
+        this.dropZone.addEventListener('dragenter', e => this.handleDragEnter(e));
+        this.dropZone.addEventListener('dragover', e => this.handleDragOver(e));
+        this.dropZone.addEventListener('dragleave', e => this.handleDragLeave(e));
+        this.dropZone.addEventListener('drop', e => this.handleDrop(e));
+        this.dropZone.addEventListener('click', () => this.fileInput.click());
+        this.fileInput.addEventListener('change', e => this.handleFileSelect(e));
+        this.uploadButton.addEventListener('click', () => this.simulateUpload());
+        this.cancelButton.addEventListener('click', () => this.cancelUpload());
     }
 
-    handleKeyDown(e) {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            this.fileInput.click();
+    /**
+     * Handle dragenter event, increment drag counter and show active state.
+     */
+    handleDragEnter(e) {
+        e.preventDefault();
+        this.dragCounter++;
+        this.dropZone.classList.add('drag-active');
+    }
+    /**
+     * Handle dragover event, prevent default to allow drop.
+     */
+    handleDragOver(e) {
+        e.preventDefault();
+    }
+    /**
+     * Handle dragleave event, decrement drag counter and hide active state if needed.
+     */
+    handleDragLeave(e) {
+        e.preventDefault();
+        this.dragCounter--;
+        if (this.dragCounter <= 0) {
+            this.dragCounter = 0;
+            this.dropZone.classList.remove('drag-active');
         }
     }
 
+    /**
+     * Handle file drop event, process dropped files.
+     */
+    handleDrop(e) {
+        e.preventDefault();
+        this.dropZone.classList.remove('drag-active');
+        this.dragCounter = 0;
+        const files = Array.from(e.dataTransfer.files);
+        this.processFiles(files);
+    }
+    /**
+     * Handle file input change event, process selected files.
+     */
     handleFileSelect(e) {
-        const selectedFiles = Array.from(e.target.files);
-        
-        if (selectedFiles.length === 0) {
-            this.showError('No files selected');
-            return;
-        }
+        const files = Array.from(e.target.files);
+        this.processFiles(files);
+    }
 
-        // Validate each file
-        const validFiles = selectedFiles.filter(file => {
-            if (!this.allowedTypes.includes(file.type)) {
-                this.showError(`Invalid file type for ${file.name}. Allowed types: ${this.allowedTypes.join(', ')}`);
-                return false;
-            }
-
-            if (file.size > this.maxFileSize) {
-                this.showError(`File ${file.name} is too large. Maximum size: ${this.formatFileSize(this.maxFileSize)}`);
-                return false;
-            }
-
-            if (file.size === 0) {
-                this.showError(`File ${file.name} is empty`);
-                return false;
-            }
-
-            return true;
+    /**
+     * Validate and process selected files, show errors if invalid.
+     */
+    processFiles(files) {
+        const validFiles = files.filter(file => {
+            const result = isValidImageFile(file, UPLOADER_CONFIG);
+            if (!result.valid) this.showError(result.error);
+            return result.valid;
         });
-
         if (validFiles.length === 0) return;
-
-        this.files = validFiles;
+        // Assign unique IDs and store as {id, file}
+        this.selectedFiles = validFiles.map(file => ({
+            id: `${file.name}_${file.size}_${file.lastModified || Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            file
+        }));
         this.hideError();
         this.displayFileInfo();
         this.previewFiles();
-        
-        // Focus and scroll to upload button after successful file selection
-        this.focusAndScrollToUploadButton();
     }
 
+    /**
+     * (Deprecated) Validate a single file. Use isValidImageFile instead.
+     */
+    validateFile(file) {
+        return isValidImageFile(file, UPLOADER_CONFIG).valid;
+    }
+
+    /**
+     * Show file count and total size in the UI.
+     */
     displayFileInfo() {
-        const totalSize = this.files.reduce((sum, file) => sum + file.size, 0);
-        this.fileCount.textContent = `${this.files.length} file${this.files.length > 1 ? 's' : ''}`;
+        const totalSize = this.selectedFiles.reduce((sum, f) => sum + f.file.size, 0);
+        this.fileCount.textContent = `${this.selectedFiles.length} file${this.selectedFiles.length > 1 ? 's' : ''}`;
         this.totalSize.textContent = this.formatFileSize(totalSize);
         this.previewSection.classList.remove('hidden');
-        
-        // Add success animation to the preview section
-        this.previewSection.classList.add('animate-bounce-in');
-        setTimeout(() => {
-            this.previewSection.classList.remove('animate-bounce-in');
-        }, 600);
     }
 
+    /**
+     * Render image previews for selected files.
+     * Optimized: batch DOM updates, use stable file references.
+     */
     previewFiles() {
         this.imagePreview.innerHTML = '';
-        
-        this.files.forEach((file, index) => {
+        this.previewSection.classList.remove('hidden');
+        if (this.selectedFiles.length === 0) {
+            this.previewSection.classList.add('hidden');
+            return;
+        }
+        const previewElements = [];
+        let loadedCount = 0;
+        this.selectedFiles.forEach(({id, file}, idx) => {
             const reader = new FileReader();
-            
             reader.onload = (e) => {
-                const previewContainer = document.createElement('div');
-                previewContainer.className = 'preview-container drop-success';
-                
+                const wrapper = document.createElement('div');
+                wrapper.className = 'preview-container drop-success';
                 const img = document.createElement('img');
                 img.src = e.target.result;
                 img.className = 'preview-image';
-                img.alt = `Preview of ${file.name}`;
-                
-                const removeButton = document.createElement('button');
-                removeButton.className = 'remove-button';
-                removeButton.setAttribute('aria-label', `Remove ${file.name}`);
-                removeButton.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                    </svg>
-                `;
-                
-                removeButton.addEventListener('click', () => {
-                    this.removeFile(index);
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-button';
+                removeBtn.innerHTML = `🗑️`;
+                removeBtn.setAttribute('aria-label', `Remove image ${file.name}`);
+                removeBtn.addEventListener('click', () => {
+                    this.removeFileById(id);
                 });
-                
-                previewContainer.appendChild(img);
-                previewContainer.appendChild(removeButton);
-                this.imagePreview.appendChild(previewContainer);
+                wrapper.appendChild(img);
+                wrapper.appendChild(removeBtn);
+                previewElements[idx] = wrapper;
+                loadedCount++;
+                if (loadedCount === this.selectedFiles.length) {
+                    this.imagePreview.innerHTML = '';
+                    previewElements.forEach(el => {
+                        if (el) this.imagePreview.appendChild(el);
+                    });
+                }
             };
-            
             reader.readAsDataURL(file);
         });
-        
-        this.displayFileInfo();
     }
 
-    removeFile(index) {
-        this.files.splice(index, 1);
+    /**
+     * Remove a file by its unique ID and update preview.
+     */
+    removeFileById(id) {
+        this.selectedFiles = this.selectedFiles.filter(f => f.id !== id);
         this.previewFiles();
-        
-        if (this.files.length === 0) {
-            this.previewSection.classList.add('hidden');
-        }
+        if (this.selectedFiles.length === 0) this.previewSection.classList.add('hidden');
     }
 
+    /**
+     * Simulate an upload with a progress bar and stats.
+     */
     simulateUpload() {
-        if (this.files.length === 0) return;
-
-        console.log('Starting upload simulation...'); // Debug log
-
-        // Reset progress
-        this.progressBar.style.width = '0%';
-        this.progressBar.setAttribute('aria-valuenow', 0);
-        
-        // Reset progress percentage display
-        const progressPercentage = document.getElementById('progressPercentage');
-        if (progressPercentage) {
-            progressPercentage.textContent = '0%';
-        }
-        
+        if (this.selectedFiles.length === 0) return;
+        this.isUploading = true;
         this.uploadButton.disabled = true;
         this.uploadButton.textContent = 'Uploading...';
         this.cancelButton.classList.remove('hidden');
-        this.isUploading = true;
         this.startTime = Date.now();
         this.lastLoaded = 0;
-
-        const totalSize = this.files.reduce((sum, file) => sum + file.size, 0);
+        const totalSize = this.selectedFiles.reduce((sum, f) => sum + f.file.size, 0);
         let uploadedSize = 0;
-
-        console.log(`Total size: ${totalSize} bytes`); // Debug log
-
-        // Simulate upload progress
         let progress = 0;
+
         this.uploadInterval = setInterval(() => {
             if (!this.isUploading) {
                 clearInterval(this.uploadInterval);
@@ -288,308 +273,169 @@ class DragDropUploader {
             }
 
             uploadedSize = (progress / 100) * totalSize;
-            console.log(`Progress: ${progress.toFixed(1)}%, Uploaded: ${uploadedSize.toFixed(0)} bytes`); // Debug log
-            this.updateUploadStats(uploadedSize, totalSize);
+            const percent = Math.round((uploadedSize / totalSize) * 100);
+            this.progressBar.style.width = `${percent}%`;
+            this.progressBar.setAttribute('aria-valuenow', percent);
+            const speed = uploadedSize / ((Date.now() - this.startTime) / 1000);
+            const remaining = (totalSize - uploadedSize) / speed;
+            this.uploadSpeed.textContent = `${(speed / 1024).toFixed(1)} KB/s`;
+            this.timeRemaining.textContent = `${Math.ceil(remaining)}s remaining`;
+            const pp = document.getElementById('progressPercentage');
+            if (pp) pp.textContent = `${percent}%`;
         }, 200);
     }
 
-    updateUploadStats(loaded, total) {
-        const percentage = Math.round((loaded / total) * 100);
-        this.progressBar.style.width = percentage + '%';
-        this.progressBar.setAttribute('aria-valuenow', percentage);
-        
-        // Update progress percentage display
-        const progressPercentage = document.getElementById('progressPercentage');
-        if (progressPercentage) {
-            progressPercentage.textContent = `${percentage}%`;
-            console.log(`Progress updated: ${percentage}%`); // Debug log
-        } else {
-            console.error('progressPercentage element not found!'); // Debug log
-        }
-        
-        const now = Date.now();
-        const timeElapsed = (now - this.startTime) / 1000;
-        const bytesPerSecond = loaded / timeElapsed;
-        const remainingBytes = total - loaded;
-        const timeRemaining = remainingBytes / bytesPerSecond;
-        
-        this.uploadSpeed.textContent = this.formatSpeed(bytesPerSecond);
-        this.timeRemaining.textContent = this.formatTimeRemaining(timeRemaining);
-        this.lastLoaded = loaded;
-    }
-
-    formatSpeed(bytesPerSecond) {
-        if (bytesPerSecond < 1024) {
-            return `${bytesPerSecond.toFixed(1)} B/s`;
-        } else if (bytesPerSecond < 1024 * 1024) {
-            return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-        } else {
-            return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
-        }
-    }
-
-    formatTimeRemaining(seconds) {
-        if (seconds < 60) {
-            return `${Math.ceil(seconds)}s remaining`;
-        } else {
-            const minutes = Math.floor(seconds / 60);
-            const remainingSeconds = Math.ceil(seconds % 60);
-            return `${minutes}m ${remainingSeconds}s remaining`;
-        }
-    }
-
-    uploadComplete() {
+    /**
+     * Complete the upload, save to localStorage as a new group, and dispatch event.
+     *
+     * Note: For very large galleries, consider lazy loading images in the side panel for performance.
+     */
+    async uploadComplete() {
         this.isUploading = false;
         clearInterval(this.uploadInterval);
-        
-        // Add success animation to progress bar
-        this.progressBar.classList.add('success-glow');
-        
-        // Update progress to 100%
-        this.progressBar.style.width = '100%';
-        this.progressBar.setAttribute('aria-valuenow', 100);
-        
-        const progressPercentage = document.getElementById('progressPercentage');
-        if (progressPercentage) {
-            progressPercentage.textContent = '100%';
-        }
-        
-        // Show success message
-        this.toastManager.show(`${this.files.length} image${this.files.length > 1 ? 's' : ''} uploaded successfully!`, 'success');
-        
-        // Trigger custom event for side panel
+
+        // Dispatch event with File objects and previews
         const uploadSuccessEvent = new CustomEvent('uploadSuccess', {
-            detail: { files: this.files }
+            detail: {
+                files: this.selectedFiles.map(f => f.file), // Original File objects
+                previews: await this.generatePreviews(this.selectedFiles)
+            }
         });
         this.dropZone.dispatchEvent(uploadSuccessEvent);
-        
-        // Reset upload stats
-        this.uploadSpeed.textContent = '-';
-        this.timeRemaining.textContent = '-';
-        
-        // Hide cancel button and show upload button
+
+        // Convert to base64 and save as a new group
+        const filesToSave = await Promise.all(this.selectedFiles.map(async ({id, file}) => ({
+            id,
+            name: file.name,
+            type: file.type,
+            data: await this.fileToBase64(file)
+        })));
+        const group = {
+            timestamp: Date.now(),
+            images: filesToSave
+        };
+        let groups = [];
+        try {
+            const saved = localStorage.getItem(this.storageKey);
+            if (saved) {
+                groups = JSON.parse(saved);
+                if (!Array.isArray(groups)) groups = [];
+            }
+        } catch (e) {
+            groups = [];
+        }
+        groups.unshift(group); // Add new group to the start
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(groups));
+        } catch (e) {
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+                this.toastManager.show('Storage limit reached! Please delete some images.', 'error');
+                return;
+            }
+            throw e;
+        }
+
+        this.toastManager.show(`${filesToSave.length} image${filesToSave.length > 1 ? 's' : ''} uploaded successfully!`, 'success');
+        this.progressBar.style.width = '100%';
+        this.progressBar.setAttribute('aria-valuenow', 100);
+        this.uploadButton.disabled = false;
+        this.uploadButton.textContent = 'Upload Images';
         this.cancelButton.classList.add('hidden');
-        this.uploadButton.classList.remove('hidden');
-        
-        // Clear files after a short delay to show completion
-        setTimeout(() => {
-            this.clearPreview();
-            this.progressBar.classList.remove('success-glow');
-        }, 2000);
+        const pp = document.getElementById('progressPercentage');
+        if (pp) pp.textContent = `100%`;
+        setTimeout(() => this.clearPreview(), 2000);
     }
 
+    /**
+     * Generate base64 previews for files.
+     */
+    async generatePreviews(selectedFiles) {
+        return Promise.all(selectedFiles.map(({id, file}) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve({
+                    id,
+                    url: e.target.result,
+                    name: file.name,
+                    type: file.type
+                });
+                reader.readAsDataURL(file);
+            });
+        }));
+    }
+
+    /**
+     * Cancel the current upload and reset UI.
+     */
+    cancelUpload() {
+        if (!this.isUploading) return;
+        clearInterval(this.uploadInterval);
+        this.isUploading = false;
+        this.progressBar.style.width = '0%';
+        this.uploadButton.disabled = false;
+        this.uploadButton.textContent = 'Upload Images';
+        this.cancelButton.classList.add('hidden');
+        this.toastManager.show('Upload cancelled', 'error');
+        const pp = document.getElementById('progressPercentage');
+        if (pp) pp.textContent = `0%`;
+    }
+
+    /**
+     * Convert a File to a base64 data URL.
+     */
+    fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+    }
+
+    /**
+     * Clear the preview area and reset UI state.
+     */
     clearPreview() {
-        // Clear the file input
         this.fileInput.value = '';
-        this.files = [];
-        
-        // Clear the preview
+        this.selectedFiles = [];
         this.imagePreview.innerHTML = '';
         this.previewSection.classList.add('hidden');
-        
-        // Reset all stats
         this.fileCount.textContent = '0 files';
         this.totalSize.textContent = '-';
         this.uploadSpeed.textContent = '-';
         this.timeRemaining.textContent = '-';
         this.progressBar.style.width = '0%';
         this.progressBar.setAttribute('aria-valuenow', 0);
-        
-        // Reset progress percentage display
-        const progressPercentage = document.getElementById('progressPercentage');
-        if (progressPercentage) {
-            progressPercentage.textContent = '0%';
-        }
-        
-        // Reset buttons
-        this.uploadButton.disabled = false;
-        this.uploadButton.textContent = 'Upload Images';
-        this.cancelButton.classList.add('hidden');
-        
-        // Clear localStorage
-        localStorage.removeItem(this.storageKey);
-        
-        // Hide any error messages
-        this.hideError();
+        const pp = document.getElementById('progressPercentage');
+        if (pp) pp.textContent = `0%`;
     }
 
-    cancelUpload() {
-        if (!this.isUploading) return;
-
-        this.isUploading = false;
-        clearInterval(this.uploadInterval);
-        
-        // Reset UI
-        this.progressBar.style.width = '0%';
-        this.progressBar.setAttribute('aria-valuenow', 0);
-        
-        // Reset progress percentage display
-        const progressPercentage = document.getElementById('progressPercentage');
-        if (progressPercentage) {
-            progressPercentage.textContent = '0%';
-        }
-        
-        this.uploadButton.disabled = false;
-        this.uploadButton.textContent = 'Upload Images';
-        this.cancelButton.classList.add('hidden');
-        this.uploadSpeed.textContent = '-';
-        this.timeRemaining.textContent = '-';
-        
-        // Show cancellation message
-        this.showError('Upload cancelled');
-        
-        // Hide error message after 2 seconds
-        setTimeout(() => {
-            this.hideError();
-        }, 2000);
-    }
-
-    handleDragOver(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.dropZone.classList.add('drag-active');
-    }
-
-    handleDragLeave() {
-        e.preventDefault();
-        e.stopPropagation();
-        this.dragCounter--;
-        
-        if (this.dragCounter === 0) {
-            this.dropZone.classList.remove('drag-active');
-        }
-    }
-
-    handleDrop(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.dropZone.classList.remove('drag-active');
-        this.dragCounter = 0;
-        
-        const files = Array.from(e.dataTransfer.files);
-        this.processFiles(files);
-    }
-
-    processFiles(files) {
-        if (files.length === 0) {
-            this.toastManager.show('No files selected', 'error');
-            return;
-        }
-
-        // Validate each file
-        const validFiles = files.filter(file => {
-            if (!this.allowedTypes.includes(file.type)) {
-                this.toastManager.show(`Invalid file type: ${file.name}`, 'error');
-                return false;
-            }
-
-            if (file.size > this.maxFileSize) {
-                this.toastManager.show(`File too large: ${file.name}`, 'error');
-                return false;
-            }
-
-            if (file.size === 0) {
-                this.toastManager.show(`Empty file: ${file.name}`, 'error');
-                return false;
-            }
-
-            return true;
-        });
-
-        if (validFiles.length > 0) {
-            this.files = validFiles;
-            this.hideError();
-            this.displayFileInfo();
-            this.previewFiles();
-            this.toastManager.show(`${validFiles.length} files ready to upload`, 'success');
-            
-            // Focus and scroll to upload button after successful file processing
-            this.focusAndScrollToUploadButton();
-        }
-    }
-
+    /**
+     * Show an error message using the toast manager.
+     */
     showError(message) {
-        this.errorMessage.textContent = message;
-        this.errorMessage.classList.remove('hidden');
-        this.errorMessage.classList.add('error-shake');
-        
-        // Add error styling
-        this.errorMessage.className = 'bg-error-50 border-l-4 border-error-500 text-error-700 dark:bg-error-900 dark:border-error-700 dark:text-error-100 p-4 mb-6 rounded-xl error-shake';
-        
-        // Remove error animation after it completes
-        setTimeout(() => {
-            this.errorMessage.classList.remove('error-shake');
-        }, 500);
-        
-        // Show error toast
-        this.toastManager.show(message, 'error');
+        if (this.toastManager) {
+            this.toastManager.show(message, 'error');
+        }
+        this.uploadButton.disabled = false;
+        this.uploadButton.textContent = 'Upload Images';
     }
 
+    /**
+     * Hide the error message area.
+     */
     hideError() {
-        this.errorMessage.classList.add('hidden');
+        this.errorMessage?.classList?.add('hidden');
     }
 
     loadFromLocalStorage() {
-        try {
-        const savedData = localStorage.getItem(this.storageKey);
-        if (!savedData) return;
-
-            const uploadData = JSON.parse(savedData);
-            
-            // Validate saved data
-            if (!Array.isArray(uploadData) || uploadData.length === 0) {
-                throw new Error('Invalid saved data format');
-            }
-
-            // Note: We can't fully restore files from localStorage
-            // Just show the file information
-            this.fileCount.textContent = `${uploadData.length} file${uploadData.length > 1 ? 's' : ''} previously uploaded`;
-            const totalSize = uploadData.reduce((sum, file) => sum + file.size, 0);
-            this.totalSize.textContent = `Total size: ${this.formatFileSize(totalSize)}`;
-            this.previewSection.classList.remove('hidden');
-        } catch (error) {
-            console.error('Error loading from localStorage:', error);
-            localStorage.removeItem(this.storageKey);
-        }
+        // No longer needed in uploader; previews are handled by side panel
     }
 
-    focusAndScrollToUploadButton() {
-        // Wait for the preview section to be visible and animations to complete
-        setTimeout(() => {
-            if (this.uploadButton && !this.uploadButton.disabled) {
-                // Smooth scroll to the upload button
-                this.uploadButton.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'center',
-                    inline: 'nearest'
-                });
-                
-                // Focus the upload button after a short delay to ensure scroll completes
-                setTimeout(() => {
-                    this.uploadButton.focus();
-                }, 300);
-            }
-        }, 700); // Wait for preview animations to complete
-    }
-
-    // Constants
-    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif'];
-
-    // Modularize file validation
-    validateFile(file) {
-        if (!ALLOWED_TYPES.includes(file.type)) {
-            this.showError(`Invalid file type for ${file.name}. Allowed types: ${ALLOWED_TYPES.join(', ')}`);
-            return false;
-        }
-        if (file.size > MAX_FILE_SIZE) {
-            this.showError(`File ${file.name} is too large. Maximum size: ${this.formatFileSize(MAX_FILE_SIZE)}`);
-            return false;
-        }
-        if (file.size === 0) {
-            this.showError(`File ${file.name} is empty`);
-            return false;
-        }
-        return true;
+    /**
+     * Clean up any intervals or resources on unload.
+     */
+    cleanup() {
+        if (this.uploadInterval) clearInterval(this.uploadInterval);
     }
 }
