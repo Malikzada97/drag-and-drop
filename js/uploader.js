@@ -59,6 +59,47 @@ function isValidImageFile(file, config = UPLOADER_CONFIG) {
     return { valid: true };
 }
 
+// IndexedDB Utility for Image Storage
+const DB_NAME = 'ImageUploaderDB';
+const DB_VERSION = 1;
+const GROUPS_STORE = 'imageGroups';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(GROUPS_STORE)) {
+                db.createObjectStore(GROUPS_STORE, { keyPath: 'timestamp' });
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function addImageGroupToDB(group) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(GROUPS_STORE, 'readwrite');
+        const store = tx.objectStore(GROUPS_STORE);
+        store.add(group);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function getAllImageGroupsFromDB() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(GROUPS_STORE, 'readonly');
+        const store = tx.objectStore(GROUPS_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
 class DragDropUploader {
     /**
      * Initialize the uploader with DOM elements and config.
@@ -293,57 +334,60 @@ class DragDropUploader {
     async uploadComplete() {
         this.isUploading = false;
         clearInterval(this.uploadInterval);
-
-        // Dispatch event with File objects and previews
-        const uploadSuccessEvent = new CustomEvent('uploadSuccess', {
-            detail: {
-                files: this.selectedFiles.map(f => f.file), // Original File objects
-                previews: await this.generatePreviews(this.selectedFiles)
-            }
-        });
-        this.dropZone.dispatchEvent(uploadSuccessEvent);
-
-        // Convert to base64 and save as a new group
-        const filesToSave = await Promise.all(this.selectedFiles.map(async ({id, file}) => ({
-            id,
-            name: file.name,
-            type: file.type,
-            data: await this.fileToBase64(file)
-        })));
-        const group = {
-            timestamp: Date.now(),
-            images: filesToSave
-        };
-        let groups = [];
+        let errorOccurred = false;
         try {
-            const saved = localStorage.getItem(this.storageKey);
-            if (saved) {
-                groups = JSON.parse(saved);
-                if (!Array.isArray(groups)) groups = [];
-            }
-        } catch (e) {
-            groups = [];
-        }
-        groups.unshift(group); // Add new group to the start
-        try {
-            localStorage.setItem(this.storageKey, JSON.stringify(groups));
-        } catch (e) {
-            if (e.name === 'QuotaExceededError' || e.code === 22) {
-                this.toastManager.show('Storage limit reached! Please delete some images.', 'error');
-                return;
-            }
-            throw e;
-        }
+            // Dispatch event with File objects and previews
+            const uploadSuccessEvent = new CustomEvent('uploadSuccess', {
+                detail: {
+                    files: this.selectedFiles.map(f => f.file), // Original File objects
+                    previews: await this.generatePreviews(this.selectedFiles)
+                }
+            });
+            this.dropZone.dispatchEvent(uploadSuccessEvent);
 
-        this.toastManager.show(`${filesToSave.length} image${filesToSave.length > 1 ? 's' : ''} uploaded successfully!`, 'success');
-        this.progressBar.style.width = '100%';
-        this.progressBar.setAttribute('aria-valuenow', 100);
-        this.uploadButton.disabled = false;
-        this.uploadButton.textContent = 'Upload Images';
-        this.cancelButton.classList.add('hidden');
-        const pp = document.getElementById('progressPercentage');
-        if (pp) pp.textContent = `100%`;
-        setTimeout(() => this.clearPreview(), 2000);
+            // Convert to base64 and save as a new group in IndexedDB
+            const filesToSave = await Promise.all(this.selectedFiles.map(async ({id, file}) => ({
+                id,
+                name: file.name,
+                type: file.type,
+                data: await this.fileToBase64(file)
+            })));
+            const group = {
+                timestamp: Date.now(),
+                images: filesToSave
+            };
+            try {
+                await addImageGroupToDB(group);
+            } catch (e) {
+                this.toastManager.show('Failed to save images to device storage.', 'error');
+                errorOccurred = true;
+            }
+
+            if (!errorOccurred) {
+                this.toastManager.show(`${filesToSave.length} image${filesToSave.length > 1 ? 's' : ''} uploaded successfully!`, 'success');
+            }
+            this.progressBar.style.width = '100%';
+            this.progressBar.setAttribute('aria-valuenow', 100);
+            this.uploadButton.disabled = false;
+            this.uploadButton.textContent = 'Upload Images';
+            this.cancelButton.classList.add('hidden');
+            const pp = document.getElementById('progressPercentage');
+            if (pp) pp.textContent = `100%`;
+        } catch (e) {
+            this.toastManager.show('An error occurred during upload.', 'error');
+        } finally {
+            // Always clear preview and reset UI after 2 seconds
+            setTimeout(() => this.clearPreview(), 2000);
+            this.isUploading = false;
+            clearInterval(this.uploadInterval);
+            this.uploadButton.disabled = false;
+            this.uploadButton.textContent = 'Upload Images';
+            this.cancelButton.classList.add('hidden');
+            this.progressBar.style.width = '0%';
+            this.progressBar.setAttribute('aria-valuenow', 0);
+            const pp = document.getElementById('progressPercentage');
+            if (pp) pp.textContent = `0%`;
+        }
     }
 
     /**

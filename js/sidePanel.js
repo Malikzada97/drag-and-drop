@@ -96,15 +96,13 @@ class SidePanel {
     async initialize() {
         try {
             console.log('SidePanel: Starting initialization...');
-            
-            // Test localStorage first
-            if (!this.testLocalStorage()) {
-                const msg = 'Initialization failed: localStorage is not available or not working. Please check your browser settings.';
-                this.showUserError(msg);
-                throw new Error(msg);
-            }
-            
-            await this.loadFromLocalStorage();
+            // Test localStorage first (no longer needed)
+            // if (!this.testLocalStorage()) {
+            //     const msg = 'Initialization failed: localStorage is not available or not working. Please check your browser settings.';
+            //     this.showUserError(msg);
+            //     throw new Error(msg);
+            // }
+            await this.loadFromIndexedDB();
             this.isInitialized = true;
             console.log('SidePanel: Initialization complete');
         } catch (error) {
@@ -112,6 +110,27 @@ class SidePanel {
             this.showUserError(msg);
             console.error(msg);
             this.isInitialized = true; // Mark as initialized even if loading fails
+        }
+    }
+
+    /**
+     * Load saved data from IndexedDB instead of localStorage.
+     */
+    async loadFromIndexedDB() {
+        try {
+            const groups = await getAllImageGroupsFromDB();
+            if (Array.isArray(groups)) {
+                // Clear current UI
+                this.uploadedGroups.clear();
+                this.uploadedImagesList.innerHTML = '';
+                // Add all groups
+                groups.forEach(group => {
+                    this.addImageGroup(group.images, group.timestamp);
+                });
+            }
+            this.updateEmptyState();
+        } catch (e) {
+            this.showUserError('Failed to load images from device storage.');
         }
     }
 
