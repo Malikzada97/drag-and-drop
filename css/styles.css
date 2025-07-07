@@ -912,6 +912,8 @@ input:focus-visible {
     height: 100%;
     object-fit: cover;
     border-radius: 0.5rem;
+    opacity: 1 !important;
+    animation: none !important;
 }
 
 /* Remove button (light and dark) */
